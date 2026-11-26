@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { calculatePrediction } from '@/lib/algorithm';
 import { checkCronAuth } from '@/lib/cronAuth';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
-import { currentSeason, getFixturesByDate, getH2H, getTeamStats } from '@/lib/apiFootball';
+import { currentSeason, getFixturesByDate, getH2H, getTeamStats, minGapMs } from '@/lib/apiFootball';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -20,6 +20,9 @@ export async function GET(req: NextRequest) {
   const denied = checkCronAuth(req);
   if (denied) return denied;
 
+  const startedAt = Date.now();
+  const BUDGET_MS = 50_000; // maxDuration = 60s
+
   try {
     const date = req.nextUrl.searchParams.get('date') ?? new Date().toISOString().slice(0, 10);
     const season = currentSeason(new Date(date));
@@ -28,9 +31,7 @@ export async function GET(req: NextRequest) {
     const db = supabaseAdmin();
 
     // 1. Matchs du jour (pas encore commences)
-    const lists = await Promise.all(TRACKED_LEAGUES.map((l) => getFixturesByDate(date, l.id, season)));
-    const upcoming = lists
-      .flat()
+    const upcoming = (await getFixturesByDate(date, TRACKED_LEAGUES.map((l) => l.id)))
       .filter((f) => f.fixture.status.short === 'NS')
       .sort((a, b) => a.fixture.date.localeCompare(b.fixture.date))
       .slice(0, maxFixtures);
@@ -47,6 +48,11 @@ export async function GET(req: NextRequest) {
 
     for (const f of upcoming) {
       if (done.has(f.fixture.id)) continue;
+      // 3 appels par match: on s'arrete avant le timeout. Relancer la route reprend la ou ca s'est arrete.
+      if (Date.now() - startedAt + 3 * minGapMs() + 3000 > BUDGET_MS) {
+        skipped.push({ id: f.fixture.id, reason: 'temps ecoule, relancer la route' });
+        continue;
+      }
       const leagueId = f.league.id;
       const [home, away, h2h] = await Promise.all([
         getTeamStats(f.teams.home.id, leagueId, season),
