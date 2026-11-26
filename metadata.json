@@ -1,0 +1,7 @@
+{
+  "name": "PickSlip",
+  "description": "Plateforme automatisée de prédictions de football par algorithme statistique avec pronostics VIP et statistiques en direct",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+
