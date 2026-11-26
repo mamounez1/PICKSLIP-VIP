@@ -3,7 +3,21 @@ import type { H2HStatsInput } from './algorithm';
 
 const BASE = 'https://v3.football.api-sports.io';
 
+// Limiteur: le plan gratuit autorise 10 requetes/minute. Chaque appel reserve un creneau
+// (meme si plusieurs appels partent en parallele). Plan payant: API_MIN_GAP_MS=200.
+let nextSlot = 0;
+export function minGapMs(): number {
+  return Number(process.env.API_MIN_GAP_MS ?? 6500);
+}
+async function throttle() {
+  const now = Date.now();
+  const start = Math.max(now, nextSlot);
+  nextSlot = start + minGapMs();
+  if (start > now) await new Promise((r) => setTimeout(r, start - now));
+}
+
 async function af(path: string, params: Record<string, string | number>): Promise<any[]> {
+  await throttle();
   const url = new URL(BASE + path);
   Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, String(v)));
   const res = await fetch(url, { headers: { 'x-apisports-key': requireEnv('API_FOOTBALL_KEY') }, cache: 'no-store' });
@@ -29,8 +43,10 @@ export interface ApiFixture {
   score: { fulltime: { home: number | null; away: number | null } };
 }
 
-export async function getFixturesByDate(date: string, leagueId: number, season: number): Promise<ApiFixture[]> {
-  return af('/fixtures', { date, league: leagueId, season });
+// UN SEUL appel pour tous les matchs du jour, filtres ensuite localement par ligue.
+export async function getFixturesByDate(date: string, leagueIds: number[]): Promise<ApiFixture[]> {
+  const all = (await af('/fixtures', { date })) as ApiFixture[];
+  return all.filter((f) => leagueIds.includes(f.league.id));
 }
 
 export async function getFixturesByIds(ids: number[]): Promise<ApiFixture[]> {
